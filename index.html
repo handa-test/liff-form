@@ -1124,7 +1124,9 @@
             }
         }
 
+        // 送信成功時の処理
         async function handleSuccess(data) {
+            // まず LIFF で自分のトークにメッセージ（LIFF内で開いている場合のみ）
             try {
                 if (typeof liff !== 'undefined' && liff.isInClient()) {
                     const messageText =
@@ -1143,13 +1145,57 @@
                 }
             } catch (liffError) {
                 console.error("LIFFメッセージ送信エラー:", liffError);
-                // ここで UI にも軽く出したい場合
+                // 必要ならユーザーにも一言出す（予約自体は成功）
                 // showMessage("LINEメッセージ送信に失敗しましたが、予約自体は完了しています。", "error");
             }
 
-            // 完了画面の表示処理はそのまま
-            ...
+            // --- 完了画面UIの更新 ---
+
+            // フッターナビを隠す
+            document.getElementById('footer-nav').classList.add('hidden');
+
+            // 確認ステップを隠して完了画面を表示
+            const step7 = document.getElementById('step-7');
+            if (step7) step7.classList.add('hidden');
+            document.getElementById('step-complete').classList.remove('hidden');
+
+            // 予約番号があれば完了メッセージ枠に表示
+            const msgBox = document.getElementById('complete-message');
+            if (data && data.reservationId) {
+                msgBox.textContent = `予約番号: ${data.reservationId}`;
+                msgBox.classList.remove('hidden');
+            } else {
+                msgBox.classList.add('hidden');
+            }
+
+            // メインコンテンツの先頭までスクロール（全体をスクロールでもOK）
+            const main = document.getElementById('main-content');
+            if (main) {
+                main.scrollTop = 0;
+            } else {
+                window.scrollTo({
+                    top: 0,
+                    behavior: 'smooth'
+                });
+            }
         }
+
+        // メッセージ表示用（この下はそのままでOK）
+        function showMessage(msg, type) {
+            const area = document.getElementById('message-area');
+            area.textContent = msg;
+            area.className =
+                `mb-4 p-3 rounded-lg text-sm text-center font-medium shadow-sm ` +
+                (type === 'error' ?
+                    'bg-red-100 text-red-600' :
+                    'bg-green-100 text-green-600');
+            area.classList.remove('hidden');
+            area.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+        }
+
 
 
         // 完了画面UIの更新
