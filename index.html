@@ -156,6 +156,7 @@
         .step-dot.completed {
             background-color: #ec4899;
         }
+
     </style>
 </head>
 
@@ -919,7 +920,7 @@
 
                 // 選択状態の復元
                 const selectedDateStr = formData.date; // "YYYY-MM-DD"
-                const currentStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                const currentStr = `${year}/${String(month + 1).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
 
                 if (selectedDateStr === currentStr) {
                     div.classList.add('selected');
@@ -927,14 +928,11 @@
 
                 if (!isPast && !isTooFar) {
                     div.onclick = () => {
-                        // 選択解除
                         document.querySelectorAll('.calendar-day').forEach(el => el.classList.remove('selected'));
                         div.classList.add('selected');
                         formData.date = currentStr;
                         document.getElementById('date-input').value = currentStr;
                         validateCurrentStep();
-
-                        // 時間枠の空き状況リセット（本来はサーバー問い合わせ）
                         generateTimeSlots();
                     };
                 }
@@ -1033,13 +1031,24 @@
             }
         }
 
+        // 追加: ヘルパー関数
+        function formatBirthdateForGas(raw) {
+            // 8桁の数字だけを変換、それ以外はそのまま返す
+            if (!/^\d{8}$/.test(raw)) return raw;
+            const y = raw.slice(0, 4);
+            const m = raw.slice(4, 6);
+            const d = raw.slice(6, 8);
+            return `${y}/${m}/${d}`;
+        }
+
+
         // 送信処理 (自社サーバー用 fetch版)
         async function submitForm() {
             if (API_ENDPOINT === "YOUR_GAS_WEB_APP_URL") { // ダミーURLチェック
                 showMessage("エラー: APIエンドポイントが設定されていません。管理者にご連絡ください。", "error");
                 // ボタン復帰
                 submitButton.disabled = false;
-                submitButton.innerHTML = '<span>予約を確定する</span>'; 
+                submitButton.innerHTML = '<span>予約を確定する</span>';
                 return;
             }
 
@@ -1055,15 +1064,16 @@
                 submitButton.innerHTML = originalHtml;
                 return;
             }
-            
+
             // 送信用JSONデータを作成 (formDataを直接送信)
+            // 修正後: 送信データ作成部分
             const reservationData = {
                 menu: formData.menu,
                 store: formData.store,
-                date: formData.date,      // YYYY-MM-DD 形式
-                time: formData.time,      // HH:mm 形式
+                date: formData.date, // ①で yyyy/MM/dd にしておく前提
+                time: formData.time, // HH:mm
                 name: formData.name,
-                birthdate: formData.birthdate,
+                birthdate: formatBirthdateForGas(formData.birthdate), // ←ここを変換
                 phone: formData.phone,
                 email: formData.email,
                 remarks: formData.remarks,
@@ -1074,20 +1084,21 @@
 
             // 【デバッグ用】送信するデータを確認
             console.log("GASに送信するデータ:", JSON.stringify(reservationData));
-            
+
             try {
                 // Fetch APIでGASへ送信
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
-                    mode: 'cors', // CORSリクエスト
+                    mode: 'cors',
                     headers: {
-                        'Content-Type': 'text/plain;charset=utf-8',
+                        'Content-Type': 'application/json', // ←ここを変更
                     },
                     body: JSON.stringify(reservationData)
                 });
 
+
                 // GASからのレスポンス処理
-                const result = await response.json(); 
+                const result = await response.json();
 
                 if (result.status === 'success') {
                     handleSuccess(result);
@@ -1099,10 +1110,10 @@
             } catch (error) {
                 // 通信自体が失敗したか、レスポンスがJSONでなかった場合
                 console.error("送信エラー:", error);
-                
+
                 let errorMessage = `予約処理中にエラーが発生しました: ${error.message}`;
                 if (error.message.includes("Unexpected token") || error.message.includes("is not valid JSON")) {
-                     errorMessage = `通信エラーが発生しました。GASのデプロイ設定（アクセス権: 全員）またはAPI_ENDPOINTを再確認してください。`;
+                    errorMessage = `通信エラーが発生しました。GASのデプロイ設定（アクセス権: 全員）またはAPI_ENDPOINTを再確認してください。`;
                 }
 
                 showMessage(errorMessage, "error");
@@ -1114,47 +1125,51 @@
         }
 
         async function handleSuccess(data) {
-            // 完了画面へ遷移する前に、LIFFメッセージを送信
             try {
-                if (liff.isInClient()) {
-                    const messageText = `【予約完了】\n\n店舗: ${formData.store}\n日時: ${formData.date} ${formData.time}\nメニュー: ${formData.menu}\nお名前: ${formData.name}\n${data.reservationId ? `予約番号: ${data.reservationId}\n` : ''}\nご予約ありがとうございます。`;
-                    
-                    // LIFFメッセージのデータ構造がLINEの仕様に合致しているか確認
-                    const message = [{
+                if (typeof liff !== 'undefined' && liff.isInClient()) {
+                    const messageText =
+                        `【予約完了】\n\n` +
+                        `店舗: ${formData.store}\n` +
+                        `日時: ${formData.date} ${formData.time}\n` +
+                        `メニュー: ${formData.menu}\n` +
+                        `お名前: ${formData.name}\n` +
+                        (data.reservationId ? `予約番号: ${data.reservationId}\n` : '') +
+                        `ご予約ありがとうございます。`;
+
+                    await liff.sendMessages([{
                         type: 'text',
                         text: messageText
-                    }];
-                    
-                    console.log("LIFFで送信するメッセージ:", JSON.stringify(message));
-                    
-                    // LIFFメッセージ送信
-                    await liff.sendMessages(message);
-                    console.log("LIFFメッセージ送信成功");
+                    }]);
                 }
             } catch (liffError) {
                 console.error("LIFFメッセージ送信エラー:", liffError);
-                // ここで 'The string did not match the expected pattern.' が発生する可能性が高いです。
-                // メッセージ形式が正しいか再確認してください。
+                // ここで UI にも軽く出したい場合
+                // showMessage("LINEメッセージ送信に失敗しましたが、予約自体は完了しています。", "error");
             }
 
-            // 完了画面UIの更新
-            document.getElementById('footer-nav').classList.add('hidden');
-            document.getElementById('step-7').classList.add('hidden');
-            document.getElementById('step-complete').classList.remove('hidden');
+            // 完了画面の表示処理はそのまま
+            ...
+        }
 
-            if (data.reservationId) {
-                const msgBox = document.getElementById('complete-message');
-                msgBox.textContent = `予約番号: ${data.reservationId}`;
-                msgBox.classList.remove('hidden');
-            }
 
-            // ページトップへ
-            window.scrollTo({
-                top: 0,
-                behavior: 'smooth'
-            });
+        // 完了画面UIの更新
+        document.getElementById('footer-nav').classList.add('hidden');
+        document.getElementById('step-7').classList.add('hidden');
+        document.getElementById('step-complete').classList.remove('hidden');
 
-            // GASからの応答が成功した場合、メッセージ送信の成否にかかわらず完了画面を表示
+        if (data.reservationId) {
+            const msgBox = document.getElementById('complete-message');
+            msgBox.textContent = `予約番号: ${data.reservationId}`;
+            msgBox.classList.remove('hidden');
+        }
+
+        // ページトップへ
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+        });
+
+        // GASからの応答が成功した場合、メッセージ送信の成否にかかわらず完了画面を表示
         }
 
         function showMessage(msg, type) {
