@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>来店予約フォーム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- LIFF SDKを読み込みます -->
+    <script src="https://static.line-scdn.net/liff/2.22.3/liff.js"></script>
+
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background-color: #f7f9fb;
+            color: #1f2937;
+            margin: 0;
+            padding: 0;
+        }
+
+        .mobile-container {
+            max-width: 450px;
+            min-height: 100vh;
+            box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            background: #ffffff;
+            display: flex;
+            flex-direction: column;
+            margin: 0 auto;
+        }
+
+        .step-section {
+            background-color: #ffffff;
+            border-radius: 1.25rem;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            margin-bottom: 1.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .step-section.active {
+            border: 2px solid #ec4899;
+            /* pink-500 */
+            background-color: #fff1f2;
+            /* pink-50 */
+        }
+
+        /* カスタムラジオボタン・チェックボックスのスタイル */
+        .custom-radio:checked+div {
+            border-color: #ec4899;
+            background-color: #fdf2f8;
+            color: #be185d;
+        }
+
+        .custom-radio:checked+div .check-icon {
+            opacity: 1;
+        }
+
+        /* カレンダーのスタイル */
+        .calendar-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+        }
+
+        .calendar-day:hover:not(.disabled) {
+            background-color: #fce7f3;
+        }
+
+        .calendar-day.selected {
+            background-color: #ec4899 !important;
+            color: white !important;
+        }
+
+        .calendar-day.disabled {
+            color: #d1d5db;
+            cursor: not-allowed;
+            background-color: transparent;
+        }
+
+        .calendar-day.today {
+            font-weight: bold;
+            border: 1px solid #ec4899;
+        }
+
+        /* 時間選択ボタン */
+        .time-slot {
+            transition: all 0.2s;
+        }
+
+        .time-slot:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .time-slot.selected {
+            background-color: #ec4899;
+            color: white;
+            border-color: #ec4899;
+        }
+
+        /* アニメーション */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        /* 読み込み中スピナー */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #ec4899;
+            width: 20px;
+            height: 20px;
+            -webkit-animation: spin 1s linear infinite;
+            /* Safari */
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ステップインジケーター */
+        .step-dot {
+            transition: all 0.3s ease;
+        }
+
+        .step-dot.active {
+            background-color: #ec4899;
+            transform: scale(1.2);
+        }
+
+        .step-dot.completed {
+            background-color: #ec4899;
+        }
+
+    </style>
+</head>
+
+<body>
+    <div class="mobile-container relative">
+        <!-- ヘッダー -->
+        <header class="bg-pink-500 text-white p-4 shadow-md sticky top-0 z-50">
+            <h1 class="text-lg font-bold text-center flex items-center justify-center gap-2">
+                <span>✨</span> 来店予約フォーム
+            </h1>
+            <!-- 進捗バー -->
+            <div class="mt-4 px-2">
+                <div class="flex justify-between text-xs font-medium mb-1 opacity-90">
+                    <span id="step-status">Step 1/6</span>
+                    <span id="progress-percent">0%</span>
+                </div>
+                <div class="w-full bg-pink-200 rounded-full h-2.5">
+                    <div id="progress-bar" class="bg-white h-2.5 rounded-full transition-all duration-500 ease-out" style="width: 15%"></div>
+                </div>
+                <!-- ステップドット -->
+                <div class="flex justify-between mt-2 px-1" id="step-dots-container">
+                    <!-- JSで生成 -->
+                </div>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="flex-1 p-4 pb-24 overflow-y-auto bg-gray-50" id="main-content">
+            <form id="booking-form" onsubmit="return false;">
+
+                <!-- エラー/成功メッセージ表示エリア -->
+                <div id="message-area" class="mb-4 hidden p-3 rounded-lg text-sm text-center font-medium shadow-sm"></div>
+
+                <!-- STEP 1: ご予約内容 -->
+                <div id="step-1" class="step-section fade-in">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <span class="bg-pink-100 text-pink-600 rounded-full w-8 h-8 flex items-center justify-center mr-2 text-sm">1</span>
+                        ご予約内容
+                    </h2>
+                    <div class="space-y-3">
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="menu" value="振袖（ご購入）" class="custom-radio sr-only" onchange="handleMenuChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <span class="font-medium">振袖（ご購入）</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="menu" value="振袖（レンタル）" class="custom-radio sr-only" onchange="handleMenuChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <span class="font-medium">振袖（レンタル）</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="menu" value="振袖（ママ振袖）" class="custom-radio sr-only" onchange="handleMenuChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <span class="font-medium">振袖（ママ振袖）</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="menu" value="卒業袴（レンタル/振袖購入者）" class="custom-radio sr-only" onchange="handleMenuChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <span class="font-medium">卒業袴（レンタル/振袖購入者）</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="menu" value="卒業袴（一式レンタル/振袖レンタル者）" class="custom-radio sr-only" onchange="handleMenuChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <span class="font-medium text-sm">卒業袴（一式レンタル/振袖レンタル者）</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- STEP E Redirect: 電話予約誘導画面 (最初は非表示) -->
+                <div id="step-E-redirect" class="step-section hidden fade-in text-center py-10">
+                    <div class="mb-6 text-pink-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-4 text-gray-800">お電話でのご予約をお願いします</h3>
+                    <p class="text-gray-600 mb-8 leading-relaxed">
+                        申し訳ございません。<br>
+                        選択されたメニューは、WEB予約対象外となります。<br>
+                        お手数ですが、Studio Ange（スタジオアンジュ）まで<br>お電話にてご予約をお願いいたします。
+                    </p>
+                    <a href="tel:0123456789" class="inline-block bg-pink-500 text-white font-bold py-3 px-8 rounded-full shadow-lg hover:bg-pink-600 transition-colors transform active:scale-95">
+                        📞 電話で予約する
+                    </a>
+                    <div class="mt-6">
+                        <button type="button" onclick="resetForm()" class="text-sm text-gray-400 underline">最初に戻る</button>
+                    </div>
+                </div>
+
+
+                <!-- STEP 2: 店舗選択 -->
+                <div id="step-2" class="step-section hidden fade-in">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <span class="bg-pink-100 text-pink-600 rounded-full w-8 h-8 flex items-center justify-center mr-2 text-sm">2</span>
+                        店舗を選択
+                    </h2>
+                    <div class="grid grid-cols-1 gap-3">
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="store" value="かせ屋 和歌山店" class="custom-radio sr-only" onchange="handleStoreChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all">
+                                <div class="flex items-center mb-1">
+                                    <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                        <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                    </span>
+                                    <span class="font-bold">かせ屋 和歌山店</span>
+                                </div>
+                                <div class="text-xs text-gray-500 ml-8">営業時間: 10:00 - 19:00</div>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="store" value="かせ屋 海南店" class="custom-radio sr-only" onchange="handleStoreChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all">
+                                <div class="flex items-center mb-1">
+                                    <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                        <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                    </span>
+                                    <span class="font-bold">かせ屋 海南店</span>
+                                </div>
+                                <div class="text-xs text-gray-500 ml-8">営業時間: 10:00 - 18:00</div>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="store" value="かせ屋 岩出店" class="custom-radio sr-only" onchange="handleStoreChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all">
+                                <div class="flex items-center mb-1">
+                                    <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                        <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                    </span>
+                                    <span class="font-bold">かせ屋 岩出店</span>
+                                </div>
+                                <div class="text-xs text-gray-500 ml-8">営業時間: 10:00 - 18:30</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- STEP 3: 日付選択 -->
+                <div id="step-3" class="step-section hidden fade-in">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <span class="bg-pink-100 text-pink-600 rounded-full w-8 h-8 flex items-center justify-center mr-2 text-sm">3</span>
+                        日付を選択
+                    </h2>
+
+                    <div class="bg-white rounded-xl border border-gray-200 p-4">
+                        <div class="flex justify-between items-center mb-4">
+                            <button type="button" onclick="changeMonth(-1)" class="p-2 text-gray-600 hover:bg-gray-100 rounded-full">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                            <span id="calendar-title" class="font-bold text-lg">2024年 11月</span>
+                            <button type="button" onclick="changeMonth(1)" class="p-2 text-gray-600 hover:bg-gray-100 rounded-full">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-7 gap-1 text-center text-xs font-medium text-gray-500 mb-2">
+                            <div class="text-red-500">日</div>
+                            <div>月</div>
+                            <div>火</div>
+                            <div>水</div>
+                            <div>木</div>
+                            <div>金</div>
+                            <div class="text-blue-500">土</div>
+                        </div>
+
+                        <div id="calendar-grid" class="grid grid-cols-7 gap-1">
+                            <!-- JSで生成 -->
+                        </div>
+                    </div>
+                    <input type="hidden" name="date" id="date-input">
+                </div>
+
+                <!-- STEP 4: 時間選択 -->
+                <div id="step-4" class="step-section hidden fade-in">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <span class="bg-pink-100 text-pink-600 rounded-full w-8 h-8 flex items-center justify-center mr-2 text-sm">4</span>
+                        時間を選択
+                    </h2>
+                    <div id="time-slots-container" class="grid grid-cols-3 gap-3">
+                        <!-- JSで生成 -->
+                    </div>
+                    <input type="hidden" name="time" id="time-input">
+                </div>
+
+                <!-- STEP 5: お客様情報 -->
+                <div id="step-5" class="step-section hidden fade-in">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <span class="bg-pink-100 text-pink-600 rounded-full w-8 h-8 flex items-center justify-center mr-2 text-sm">5</span>
+                        お客様情報
+                    </h2>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">お名前 <span class="text-red-500 text-xs">必須</span></label>
+                            <input type="text" name="name" id="name" placeholder="山田 花子" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500 outline-none transition-all" required oninput="validateStep5()">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">生年月日（8桁） <span class="text-red-500 text-xs">必須</span></label>
+                            <input type="tel" name="birthdate" id="birthdate" placeholder="20040101" maxlength="8" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500 outline-none transition-all" required oninput="validateStep5()">
+                            <p class="text-xs text-gray-500 mt-1">※半角数字8桁で入力してください（例: 20040101）</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">電話番号 <span class="text-red-500 text-xs">必須</span></label>
+                            <input type="tel" name="phone" id="phone" placeholder="09012345678" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500 outline-none transition-all" required oninput="validateStep5()">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">メールアドレス</label>
+                            <input type="email" name="email" id="email" placeholder="example@gmail.com" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500 outline-none transition-all">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">備考欄</label>
+                            <textarea name="remarks" id="remarks" rows="3" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500 outline-none transition-all" placeholder="ご質問やご要望があればご記入ください"></textarea>
+                        </div>
+
+                        <div class="pt-2">
+                            <label class="flex items-start cursor-pointer">
+                                <div class="relative flex items-center">
+                                    <input type="checkbox" id="privacy-check" class="w-5 h-5 text-pink-600 border-gray-300 rounded focus:ring-pink-500" onchange="validateStep5()">
+                                </div>
+                                <div class="ml-3 text-sm">
+                                    <a href="#" class="text-pink-600 underline hover:text-pink-800">プライバシーポリシー</a>に同意する <span class="text-red-500 text-xs">必須</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STEP 6: 特典選択 (条件付き) -->
+                <div id="step-6" class="step-section hidden fade-in">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <span class="bg-pink-100 text-pink-600 rounded-full w-8 h-8 flex items-center justify-center mr-2 text-sm">6</span>
+                        ご来店特典
+                    </h2>
+                    <p class="text-sm text-gray-600 mb-4 bg-pink-50 p-3 rounded-lg border border-pink-100">
+                        振袖をご予約のお客様限定！<br>
+                        いずれか1つお選びいただけます。
+                    </p>
+
+                    <div class="space-y-3">
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="gift" value="カタログギフト" class="custom-radio sr-only" onchange="handleGiftChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <div>
+                                    <div class="font-bold">カタログギフト</div>
+                                    <div class="text-xs text-gray-500">人気ブランドコスメ多数掲載！</div>
+                                </div>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="gift" value="CLIO アイシャドウパレット" class="custom-radio sr-only" onchange="handleGiftChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <div>
+                                    <div class="font-bold">CLIO アイシャドウパレット</div>
+                                </div>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="gift" value="CHANEL リップ" class="custom-radio sr-only" onchange="handleGiftChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <div>
+                                    <div class="font-bold">CHANEL リップ</div>
+                                </div>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="gift" value="Amazonギフト券 2000円分" class="custom-radio sr-only" onchange="handleGiftChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <div>
+                                    <div class="font-bold">Amazonギフト券 2,000円分</div>
+                                </div>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer block relative">
+                            <input type="radio" name="gift" value="映画鑑賞ペアチケット" class="custom-radio sr-only" onchange="handleGiftChange(this)">
+                            <div class="p-4 rounded-xl border-2 border-gray-200 bg-white hover:border-pink-300 transition-all flex items-center">
+                                <span class="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center">
+                                    <div class="check-icon w-2.5 h-2.5 bg-pink-500 rounded-full opacity-0 transition-opacity"></div>
+                                </span>
+                                <div>
+                                    <div class="font-bold">映画鑑賞ペアチケット</div>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- STEP 7: 確認 -->
+                <div id="step-7" class="step-section hidden fade-in">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <span class="bg-pink-100 text-pink-600 rounded-full w-8 h-8 flex items-center justify-center mr-2 text-sm">✓</span>
+                        入力内容の確認
+                    </h2>
+
+                    <div class="bg-gray-50 rounded-xl p-4 space-y-4 text-sm border border-gray-200">
+                        <div class="border-b border-gray-200 pb-2">
+                            <div class="text-gray-500 text-xs mb-1">ご予約内容</div>
+                            <div class="font-bold text-gray-800 text-base" id="confirm-menu"></div>
+                        </div>
+
+                        <div class="border-b border-gray-200 pb-2">
+                            <div class="text-gray-500 text-xs mb-1">店舗</div>
+                            <div class="font-bold text-gray-800 text-base" id="confirm-store"></div>
+                        </div>
+
+                        <div class="flex gap-4 border-b border-gray-200 pb-2">
+                            <div class="flex-1">
+                                <div class="text-gray-500 text-xs mb-1">来店日</div>
+                                <div class="font-bold text-gray-800 text-base" id="confirm-date"></div>
+                            </div>
+                            <div class="flex-1">
+                                <div class="text-gray-500 text-xs mb-1">来店時間</div>
+                                <div class="font-bold text-gray-800 text-base" id="confirm-time"></div>
+                            </div>
+                        </div>
+
+                        <div class="border-b border-gray-200 pb-2">
+                            <div class="text-gray-500 text-xs mb-1">お名前</div>
+                            <div class="font-bold text-gray-800" id="confirm-name"></div>
+                        </div>
+
+                        <div class="border-b border-gray-200 pb-2">
+                            <div class="text-gray-500 text-xs mb-1">生年月日</div>
+                            <div class="font-bold text-gray-800" id="confirm-birthdate"></div>
+                        </div>
+
+                        <div class="border-b border-gray-200 pb-2">
+                            <div class="text-gray-500 text-xs mb-1">電話番号</div>
+                            <div class="font-bold text-gray-800" id="confirm-phone"></div>
+                        </div>
+
+                        <div id="confirm-gift-container" class="border-b border-gray-200 pb-2 hidden">
+                            <div class="text-gray-500 text-xs mb-1">ご来店特典</div>
+                            <div class="font-bold text-pink-600" id="confirm-gift"></div>
+                        </div>
+
+                        <div>
+                            <div class="text-gray-500 text-xs mb-1">備考</div>
+                            <div class="text-gray-800" id="confirm-remarks"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STEP Complete: 完了画面 -->
+                <div id="step-complete" class="hidden fade-in text-center py-10">
+                    <div class="mb-6 text-green-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-20 w-20 mx-auto" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <h3 class="text-2xl font-bold mb-2 text-gray-800">予約が完了しました！</h3>
+                    <p class="text-gray-600 mb-6">ご予約ありがとうございます。<br>当日お会いできるのを楽しみにしております。</p>
+
+                    <div id="complete-message" class="hidden mb-6 p-4 rounded bg-gray-100 text-sm"></div>
+
+                    <button type="button" onclick="liff.closeWindow()" class="bg-gray-800 text-white font-bold py-3 px-8 rounded-full shadow hover:bg-gray-700 transition-colors">
+                        LINEに戻る
+                    </button>
+                </div>
+
+            </form>
+        </main>
+
+        <!-- フッター（ナビゲーションボタン） -->
+        <footer class="bg-white border-t border-gray-200 p-4 sticky bottom-0 z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]" id="footer-nav">
+            <div class="flex gap-3 max-w-md mx-auto">
+                <button type="button" id="back-btn" class="flex-1 py-3 px-4 rounded-xl font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-30 hidden" onclick="goBack()">
+                    戻る
+                </button>
+                <button type="button" id="next-btn" class="flex-[2] py-3 px-4 rounded-xl font-bold text-white bg-pink-500 shadow-md hover:bg-pink-600 transition-all disabled:opacity-50 disabled:shadow-none transform active:scale-95" onclick="goNext()" disabled>
+                    次へ進む
+                </button>
+                <button type="button" id="submit-btn" class="flex-[2] py-3 px-4 rounded-xl font-bold text-white bg-pink-600 shadow-lg hover:bg-pink-700 transition-all hidden transform active:scale-95 flex items-center justify-center gap-2" onclick="submitForm()">
+                    <span>予約を確定する</span>
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // ==========================================
+        //  設定エリア（ここを書き換えてください）
+        // ==========================================
+
+        // 【重要】GASを「ウェブアプリ」としてデプロイしたURLをここに貼ってください
+        // 例: "https://script.google.com/macros/s/xxxxxxxxxxxxxxxxx/exec"
+        const API_ENDPOINT = "YOUR_GAS_WEB_APP_URL";
+
+        // 【重要】LINE Developersコンソールで取得したLIFF IDをここに設定してください
+        const LIFF_ID = "2006508190-m0e4XMnQ"; // 開発用ダミーIDが入っています
+
+        // ==========================================
+        //  ロジックエリア
+        // ==========================================
+
+        let currentStep = 1;
+        // 特典スキップのフラグ
+        let skipGiftStep = false;
+        // 最終ステップ番号（動的に変化）
+        let totalSteps = 6;
+
+        // フォームデータ
+        const formData = {
+            lineUserId: '',
+            displayName: '',
+            menu: '',
+            store: '',
+            date: '',
+            time: '',
+            name: '',
+            birthdate: '',
+            phone: '',
+            email: '',
+            remarks: '',
+            gift: ''
+        };
+
+        // 店舗データ（営業時間など）
+        const storeData = {
+            "かせ屋 和歌山店": {
+                start: 10,
+                end: 19
+            },
+            "かせ屋 海南店": {
+                start: 10,
+                end: 18
+            },
+            "かせ屋 岩出店": {
+                start: 10,
+                end: 18.5
+            } // 18:30
+        };
+
+        // DOM要素
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercent = document.getElementById('progress-percent');
+        const stepStatus = document.getElementById('step-status');
+        const backButton = document.getElementById('back-btn');
+        const nextButton = document.getElementById('next-btn');
+        const submitButton = document.getElementById('submit-btn');
+        const sections = {};
+
+        // 初期化
+        document.addEventListener('DOMContentLoaded', () => {
+            // セクション要素の取得
+            for (let i = 1; i <= 7; i++) sections[i] = document.getElementById(`step-${i}`);
+            sections['complete'] = document.getElementById('step-complete');
+            sections['E-redirect'] = document.getElementById('step-E-redirect');
+
+            // UI初期化
+            initCalendar();
+            updateStepNavUI();
+
+            // LIFF初期化
+            initLiff();
+        });
+
+        // LIFF初期化処理
+        async function initLiff() {
+            try {
+                // LIFF IDが設定されていない場合はスキップ（開発用）
+                if (!LIFF_ID || LIFF_ID === "2006508190-m0e4XMnQ") {
+                    console.log("LIFF IDが設定されていないため、LIFF初期化をスキップします。");
+                    return;
+                }
+
+                await liff.init({
+                    liffId: LIFF_ID
+                });
+
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    formData.lineUserId = profile.userId;
+                    formData.displayName = profile.displayName;
+                    console.log("LINEユーザー情報を取得しました:", formData.displayName);
+                } else {
+                    // ログインしていない場合、必要に応じてログインを促す処理を入れる
+                    // liff.login(); 
+                    console.log("LINEにログインしていません（ゲストユーザーとして扱います）");
+                }
+            } catch (err) {
+                console.error("LIFF Initialization failed", err);
+                // エラーが出てもフォーム自体は動くようにする
+            }
+        }
+
+        // ステップナビゲーションUI更新
+        function updateStepNavUI() {
+            // 進捗バー更新
+            let percent;
+            if (currentStep === 1) percent = 15;
+            else if (currentStep > totalSteps) percent = 100; // 完了
+            else percent = Math.min(100, Math.round(((currentStep - 1) / totalSteps) * 100) + 10);
+
+            progressBar.style.width = `${percent}%`;
+            progressPercent.textContent = `${percent}%`;
+            stepStatus.textContent = `Step ${currentStep > totalSteps ? totalSteps : currentStep}/${totalSteps}`;
+
+            // ステップドット更新 (簡易実装)
+            const dotsContainer = document.getElementById('step-dots-container');
+            dotsContainer.innerHTML = '';
+            // 表示用のステップ数でドット生成
+            const displaySteps = skipGiftStep ? 6 : 7; // 特典スキップなら全6ステップ(確認画面含む)
+
+            for (let i = 0; i < displaySteps; i++) {
+                const dot = document.createElement('div');
+                dot.className = `h-1.5 flex-1 mx-0.5 rounded-full step-dot ${i < (currentStep -1) ? 'completed' : ''} ${i === (currentStep -1) ? 'active' : 'bg-gray-200'}`;
+                // active以外の色はCSSで調整
+                if (i < (currentStep - 1)) dot.classList.add('bg-pink-400');
+                dotsContainer.appendChild(dot);
+            }
+
+            // ボタン表示制御
+            if (currentStep === 1) {
+                backButton.classList.add('hidden');
+            } else {
+                backButton.classList.remove('hidden');
+            }
+
+            if (currentStep === totalSteps + 1) { // 確認画面 (内部ロジック的には totalSteps + 1 が確認画面)
+                nextButton.classList.add('hidden');
+                submitButton.classList.remove('hidden');
+                stepStatus.textContent = "確認";
+            } else {
+                nextButton.classList.remove('hidden');
+                submitButton.classList.add('hidden');
+
+                // 次へボタンの有効/無効判定
+                validateCurrentStep();
+            }
+        }
+
+        // 次へ進む
+        function goNext() {
+            // 現在のステップの要素を非表示
+            if (sections[currentStep]) sections[currentStep].classList.add('hidden');
+
+            // ステップ加算ロジック
+            let nextStep = currentStep + 1;
+
+            // 特典スキップ判定 (Step 5 -> Step 7)
+            if (currentStep === 5 && skipGiftStep) {
+                nextStep = 7;
+            }
+
+            currentStep = nextStep;
+
+            // 次のステップを表示
+            if (sections[currentStep]) sections[currentStep].classList.remove('hidden');
+
+            // 確認画面(Step 7)ならデータを表示
+            if (currentStep === 7) {
+                renderConfirmData();
+            }
+
+            // 画面トップへスクロール
+            document.getElementById('main-content').scrollTop = 0;
+
+            updateStepNavUI();
+        }
+
+        // 戻る
+        function goBack() {
+            // 現在のステップを非表示
+            if (sections[currentStep]) sections[currentStep].classList.add('hidden');
+
+            let prevStep = currentStep - 1;
+
+            // 特典スキップ判定 (Step 7 -> Step 5)
+            if (currentStep === 7 && skipGiftStep) {
+                prevStep = 5;
+            }
+
+            currentStep = prevStep;
+
+            // 前のステップを表示
+            if (sections[currentStep]) sections[currentStep].classList.remove('hidden');
+
+            updateStepNavUI();
+        }
+
+        // バリデーション（次へボタンの制御）
+        function validateCurrentStep() {
+            let isValid = false;
+
+            switch (currentStep) {
+                case 1: // メニュー
+                    isValid = !!formData.menu;
+                    break;
+                case 2: // 店舗
+                    isValid = !!formData.store;
+                    break;
+                case 3: // 日付
+                    isValid = !!formData.date;
+                    break;
+                case 4: // 時間
+                    isValid = !!formData.time;
+                    break;
+                case 5: // 個人情報
+                    // 簡易チェック
+                    isValid = formData.name &&
+                        formData.birthdate && /^\d{8}$/.test(formData.birthdate) &&
+                        formData.phone &&
+                        document.getElementById('privacy-check').checked;
+                    break;
+                case 6: // 特典
+                    isValid = !!formData.gift;
+                    break;
+            }
+
+            nextButton.disabled = !isValid;
+        }
+
+        // ---------------
+        // 各ステップのハンドラ
+        // ---------------
+
+        // Step 1: メニュー選択
+        function handleMenuChange(radio) {
+            formData.menu = radio.value;
+
+            // 分岐ロジック
+            if (radio.value.includes('振袖（ご購入）') || radio.value.includes('振袖（レンタル）')) {
+                // 特典あり
+                skipGiftStep = false;
+                totalSteps = 6; // 確認画面(7)の前までが6ステップ
+            } else if (radio.value.includes('E-redirect')) {
+                // HTML上ではEは別ID扱いだが、valueで判定する場合
+            } else if (radio.value.includes('卒業袴（一式レンタル')) {
+                // Eパターン: 電話誘導へ
+                sections[1].classList.add('hidden');
+                document.getElementById('footer-nav').classList.add('hidden'); // フッター消す
+                sections['E-redirect'].classList.remove('hidden');
+                return;
+            } else {
+                // 特典なし（ママ振袖、卒業袴のみ等）
+                skipGiftStep = true;
+                totalSteps = 5; // 特典(6)を飛ばすので実質ステップ数は減るが、ID管理上は少しややこしいので「確認画面」を最終とする
+            }
+
+            validateCurrentStep();
+        }
+
+        // Eパターンのリセット
+        function resetForm() {
+            location.reload();
+        }
+
+        // Step 2: 店舗選択
+        function handleStoreChange(radio) {
+            formData.store = radio.value;
+            // 店舗が変わったら時間選択もリセットすべきだが、今回は簡易的に
+            validateCurrentStep();
+
+            // Step 4の時間枠再生成のために必要ならここでフラグを立てる
+            generateTimeSlots(); // 再生成
+        }
+
+        // Step 3: 日付選択 (カレンダー)
+        let currentDate = new Date();
+        let currentYear = currentDate.getFullYear();
+        let currentMonth = currentDate.getMonth();
+
+        function initCalendar() {
+            renderCalendar(currentYear, currentMonth);
+        }
+
+        function changeMonth(delta) {
+            currentMonth += delta;
+            if (currentMonth > 11) {
+                currentMonth = 0;
+                currentYear++;
+            } else if (currentMonth < 0) {
+                currentMonth = 11;
+                currentYear--;
+            }
+            renderCalendar(currentYear, currentMonth);
+        }
+
+        function renderCalendar(year, month) {
+            const calendarGrid = document.getElementById('calendar-grid');
+            const calendarTitle = document.getElementById('calendar-title');
+            calendarGrid.innerHTML = '';
+            calendarTitle.textContent = `${year}年 ${month + 1}月`;
+
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // 空白セル
+            for (let i = 0; i < firstDay; i++) {
+                calendarGrid.appendChild(document.createElement('div'));
+            }
+
+            // 日付セル
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateObj = new Date(year, month, d);
+                const isPast = dateObj < today;
+
+                // 3ヶ月先まで許可などのロジックを入れるならここ
+                const maxDate = new Date();
+                maxDate.setMonth(maxDate.getMonth() + 3);
+                const isTooFar = dateObj > maxDate;
+
+                const div = document.createElement('div');
+                div.className = `calendar-day ${isPast || isTooFar ? 'disabled' : ''}`;
+                div.textContent = d;
+
+                if (dateObj.getTime() === today.getTime()) {
+                    div.classList.add('today');
+                }
+
+                // 選択状態の復元
+                const selectedDateStr = formData.date; // "YYYY-MM-DD"
+                const currentStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+
+                if (selectedDateStr === currentStr) {
+                    div.classList.add('selected');
+                }
+
+                if (!isPast && !isTooFar) {
+                    div.onclick = () => {
+                        // 選択解除
+                        document.querySelectorAll('.calendar-day').forEach(el => el.classList.remove('selected'));
+                        div.classList.add('selected');
+                        formData.date = currentStr;
+                        document.getElementById('date-input').value = currentStr;
+                        validateCurrentStep();
+
+                        // 時間枠の空き状況リセット（本来はサーバー問い合わせ）
+                        generateTimeSlots();
+                    };
+                }
+
+                calendarGrid.appendChild(div);
+            }
+        }
+
+        // Step 4: 時間選択
+        function generateTimeSlots() {
+            const container = document.getElementById('time-slots-container');
+            container.innerHTML = '';
+
+            if (!formData.store) return; // 店舗未選択なら生成しない
+
+            const hours = storeData[formData.store];
+            const startHour = hours.start;
+            const endHour = hours.end;
+
+            // 30分刻みで生成
+            for (let h = startHour; h < endHour; h++) {
+                for (let m of [0, 30]) {
+                    // 閉店時間を超える場合はスキップ（例: 18:30閉店で18:30開始の枠は作らない場合）
+                    if (h === Math.floor(endHour) && m >= (endHour % 1) * 60 && (endHour % 1) > 0) continue;
+                    if (h >= endHour) continue;
+
+                    const timeStr = `${h}:${m === 0 ? '00' : '30'}`;
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'time-slot border border-gray-300 rounded-lg p-2 text-sm font-medium bg-white w-full';
+                    btn.textContent = timeStr;
+
+                    // デモ用: ランダムで満席にする (APIがないため)
+                    // 本番ではここでAPIから取得した空き状況を参照する
+                    const isFull = Math.random() < 0.15;
+
+                    if (isFull) {
+                        btn.disabled = true;
+                        btn.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
+                        btn.textContent += ' (満)';
+                    } else {
+                        btn.onclick = () => {
+                            document.querySelectorAll('.time-slot').forEach(el => el.classList.remove('selected'));
+                            btn.classList.add('selected');
+                            formData.time = timeStr;
+                            validateCurrentStep();
+                        };
+                    }
+
+                    // 選択復元
+                    if (formData.time === timeStr) {
+                        btn.classList.add('selected');
+                    }
+
+                    container.appendChild(btn);
+                }
+            }
+        }
+
+        // Step 5: 入力監視
+        function validateStep5() {
+            formData.name = document.getElementById('name').value;
+            formData.birthdate = document.getElementById('birthdate').value;
+            formData.phone = document.getElementById('phone').value;
+            formData.email = document.getElementById('email').value;
+            formData.remarks = document.getElementById('remarks').value;
+
+            validateCurrentStep();
+        }
+
+        // Step 6: 特典選択
+        function handleGiftChange(radio) {
+            formData.gift = radio.value;
+            validateCurrentStep();
+        }
+
+        // Step 7: 確認表示
+        function renderConfirmData() {
+            document.getElementById('confirm-menu').textContent = formData.menu;
+            document.getElementById('confirm-store').textContent = formData.store;
+            document.getElementById('confirm-date').textContent = formData.date;
+            document.getElementById('confirm-time').textContent = formData.time;
+            document.getElementById('confirm-name').textContent = formData.name;
+            document.getElementById('confirm-birthdate').textContent = formData.birthdate;
+            document.getElementById('confirm-phone').textContent = formData.phone;
+            document.getElementById('confirm-remarks').textContent = formData.remarks || '(なし)';
+
+            const giftContainer = document.getElementById('confirm-gift-container');
+            if (skipGiftStep) {
+                giftContainer.classList.add('hidden');
+                formData.gift = ''; // データクリア
+            } else {
+                giftContainer.classList.remove('hidden');
+                document.getElementById('confirm-gift').textContent = formData.gift;
+            }
+        }
+
+        // 送信処理 (自社サーバー用 fetch版)
+        async function submitForm() {
+            if (API_ENDPOINT === "https://script.google.com/macros/s/AKfycbys4zBQKGoHgMXXORNuzwZrKcQnSLhoNBwBND05DEYoc6XEG45qPz0JKoXfrFeULZKP/exec") {
+                showMessage("エラー: APIエンドポイントが設定されていません。管理者にご連絡ください。", "error");
+                return;
+            }
+
+            // ローディング表示
+            const btnText = submitButton.querySelector('span');
+            const originalText = btnText.textContent;
+            btnText.textContent = '送信中...';
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<div class="loader mr-2"></div> 送信中...';
+
+            try {
+                // Fetch APIでGASへ送信
+                // note: GASのWebアプリはJSON POSTを受け取る際、CORS設定やredirect処理に注意が必要
+                // 最もシンプルなのは、text/plainで投げてGAS側でJSON.parseする方法
+
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    mode: 'cors', // CORSリクエスト
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8',
+                        // GASはapplication/jsonだとpreflightで失敗する場合があるためtext/plain推奨
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                // GASからのレスポンス処理
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    handleSuccess(result);
+                } else {
+                    throw new Error(result.message || '不明なエラー');
+                }
+
+            } catch (error) {
+                console.error("送信エラー:", error);
+                showMessage(`予約処理中にエラーが発生しました: ${error.message}`, "error");
+
+                // ボタン復帰
+                submitButton.disabled = false;
+                submitButton.textContent = originalText;
+                submitButton.innerHTML = '<span>予約を確定する</span>'; // アイコン戻すのは省略
+            }
+        }
+
+        function handleSuccess(data) {
+            // 完了画面へ
+            document.getElementById('footer-nav').classList.add('hidden');
+            document.getElementById('step-7').classList.add('hidden');
+            document.getElementById('step-complete').classList.remove('hidden');
+
+            // ページトップへ
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+
+            if (data.reservationId) {
+                const msgBox = document.getElementById('complete-message');
+                msgBox.textContent = `予約番号: ${data.reservationId}`;
+                msgBox.classList.remove('hidden');
+            }
+        }
+
+        function showMessage(msg, type) {
+            const area = document.getElementById('message-area');
+            area.textContent = msg;
+            area.className = `mb-4 p-3 rounded-lg text-sm text-center font-medium shadow-sm ${type === 'error' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`;
+            area.classList.remove('hidden');
+            area.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+        }
+
+    </script>
+</body>
+
+</html>
