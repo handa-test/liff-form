@@ -591,7 +591,7 @@
 
         // 【重要】GASを「ウェブアプリ」としてデプロイしたURLをここに貼ってください
         // 例: "https://script.google.com/macros/s/xxxxxxxxxxxxxxxxx/exec"
-        const API_ENDPOINT = "YOUR_GAS_WEB_APP_URL";
+        const API_ENDPOINT = "https://script.google.com/macros/s/AKfycbys4zBQKGoHgMXXORNuzwZrKcQnSLhoNBwBND05DEYoc6XEG45qPz0JKoXfrFeULZKP/exec";
 
         // 【重要】LINE Developersコンソールで取得したLIFF IDをここに設定してください
         const LIFF_ID = "2006508190-m0e4XMnQ"; // 開発用ダミーIDが入っています
@@ -612,8 +612,8 @@
             displayName: '',
             menu: '',
             store: '',
-            date: '',
-            time: '',
+            date: '', // YYYY-MM-DD 形式
+            time: '', // HH:mm 形式
             name: '',
             birthdate: '',
             phone: '',
@@ -1035,23 +1035,52 @@
 
         // 送信処理 (自社サーバー用 fetch版)
         async function submitForm() {
-            if (API_ENDPOINT === "https://script.google.com/macros/s/AKfycbys4zBQKGoHgMXXORNuzwZrKcQnSLhoNBwBND05DEYoc6XEG45qPz0JKoXfrFeULZKP/exec") {
+            if (API_ENDPOINT === "YOUR_GAS_WEB_APP_URL") { // ダミーURLチェック
                 showMessage("エラー: APIエンドポイントが設定されていません。管理者にご連絡ください。", "error");
+                // ボタン復帰
+                submitButton.disabled = false;
+                submitButton.innerHTML = '<span>予約を確定する</span>'; 
                 return;
             }
 
             // ローディング表示
-            const btnText = submitButton.querySelector('span');
-            const originalText = btnText.textContent;
-            btnText.textContent = '送信中...';
+            const originalHtml = submitButton.innerHTML;
             submitButton.disabled = true;
             submitButton.innerHTML = '<div class="loader mr-2"></div> 送信中...';
+
+            // 最終チェック
+            if (!formData.date || !formData.time || !formData.name || !formData.phone) {
+                showMessage("予約に必要な情報（日付、時刻、氏名、電話番号）が不足しています。", "error");
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalHtml;
+                return;
+            }
+            
+            // 送信用JSONデータを作成 (formDataを直接送信)
+            // このformDataオブジェクトには、LIFF認証時に取得したlineUserIdとdisplayNameが含まれています
+            const reservationData = {
+                menu: formData.menu,
+                store: formData.store,
+                date: formData.date,      // YYYY-MM-DD 形式
+                time: formData.time,      // HH:mm 形式
+                name: formData.name,
+                birthdate: formData.birthdate,
+                phone: formData.phone,
+                email: formData.email,
+                remarks: formData.remarks,
+                gift: formData.gift,
+                lineUserId: formData.lineUserId,
+                displayName: formData.displayName
+            };
+
+            // 【デバッグ用】送信するデータを確認
+            console.log("GASに送信するデータ:", JSON.stringify(reservationData));
+            // 
 
             try {
                 // Fetch APIでGASへ送信
                 // note: GASのWebアプリはJSON POSTを受け取る際、CORS設定やredirect処理に注意が必要
                 // 最もシンプルなのは、text/plainで投げてGAS側でJSON.parseする方法
-
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     mode: 'cors', // CORSリクエスト
@@ -1059,26 +1088,36 @@
                         'Content-Type': 'text/plain;charset=utf-8',
                         // GASはapplication/jsonだとpreflightで失敗する場合があるためtext/plain推奨
                     },
-                    body: JSON.stringify(formData)
+                    body: JSON.stringify(reservationData)
                 });
 
                 // GASからのレスポンス処理
-                const result = await response.json();
+                // GAS側は必ずJSON形式で `{status: "success", reservationId: "..."}` を返す前提
+                const result = await response.json(); 
 
                 if (result.status === 'success') {
                     handleSuccess(result);
                 } else {
-                    throw new Error(result.message || '不明なエラー');
+                    // GASからエラーメッセージが返された場合
+                    throw new Error(result.message || '不明なエラー（GASサーバー側）');
                 }
 
             } catch (error) {
+                // 通信自体が失敗したか、レスポンスがJSONでなかった場合（例: GASのエラーページHTML）
                 console.error("送信エラー:", error);
-                showMessage(`予約処理中にエラーが発生しました: ${error.message}`, "error");
+                
+                // エラーの原因がGASからのHTML（前回の「Unexpected token '<'」など）であれば、
+                // GASのデプロイ設定（アクセス権: 全員）か、API_ENDPOINTが間違っている可能性が高いです。
+                let errorMessage = `予約処理中にエラーが発生しました: ${error.message}`;
+                if (error.message.includes("Unexpected token") || error.message.includes("is not valid JSON")) {
+                     errorMessage += " (GASの設定ミス(デプロイのアクセス権:全員)やAPI_ENDPOINTの誤りの可能性があります)";
+                }
+
+                showMessage(errorMessage, "error");
 
                 // ボタン復帰
                 submitButton.disabled = false;
-                submitButton.textContent = originalText;
-                submitButton.innerHTML = '<span>予約を確定する</span>'; // アイコン戻すのは省略
+                submitButton.innerHTML = originalHtml;
             }
         }
 
