@@ -156,7 +156,6 @@
         .step-dot.completed {
             background-color: #ec4899;
         }
-
     </style>
 </head>
 
@@ -591,7 +590,7 @@
 
         // 【重要】GASを「ウェブアプリ」としてデプロイしたURLをここに貼ってください
         // 例: "https://script.google.com/macros/s/xxxxxxxxxxxxxxxxx/exec"
-        const API_ENDPOINT = "https://script.google.com/macros/s/AKfycbys4zBQKGoHgMXXORNuzwZrKcQnSLhoNBwBND05DEYoc6XEG45qPz0JKoXfrFeULZKP/exec";
+        const API_ENDPOINT = "YOUR_GAS_WEB_APP_URL";
 
         // 【重要】LINE Developersコンソールで取得したLIFF IDをここに設定してください
         const LIFF_ID = "2006508190-m0e4XMnQ"; // 開発用ダミーIDが入っています
@@ -962,7 +961,8 @@
                     if (h === Math.floor(endHour) && m >= (endHour % 1) * 60 && (endHour % 1) > 0) continue;
                     if (h >= endHour) continue;
 
-                    const timeStr = `${h}:${m === 0 ? '00' : '30'}`;
+                    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; // HH:mm 形式に修正
+
                     const btn = document.createElement('button');
                     btn.type = 'button';
                     btn.className = 'time-slot border border-gray-300 rounded-lg p-2 text-sm font-medium bg-white w-full';
@@ -1057,7 +1057,6 @@
             }
             
             // 送信用JSONデータを作成 (formDataを直接送信)
-            // このformDataオブジェクトには、LIFF認証時に取得したlineUserIdとdisplayNameが含まれています
             const reservationData = {
                 menu: formData.menu,
                 store: formData.store,
@@ -1075,24 +1074,19 @@
 
             // 【デバッグ用】送信するデータを確認
             console.log("GASに送信するデータ:", JSON.stringify(reservationData));
-            // 
-
+            
             try {
                 // Fetch APIでGASへ送信
-                // note: GASのWebアプリはJSON POSTを受け取る際、CORS設定やredirect処理に注意が必要
-                // 最もシンプルなのは、text/plainで投げてGAS側でJSON.parseする方法
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     mode: 'cors', // CORSリクエスト
                     headers: {
                         'Content-Type': 'text/plain;charset=utf-8',
-                        // GASはapplication/jsonだとpreflightで失敗する場合があるためtext/plain推奨
                     },
                     body: JSON.stringify(reservationData)
                 });
 
                 // GASからのレスポンス処理
-                // GAS側は必ずJSON形式で `{status: "success", reservationId: "..."}` を返す前提
                 const result = await response.json(); 
 
                 if (result.status === 'success') {
@@ -1103,14 +1097,12 @@
                 }
 
             } catch (error) {
-                // 通信自体が失敗したか、レスポンスがJSONでなかった場合（例: GASのエラーページHTML）
+                // 通信自体が失敗したか、レスポンスがJSONでなかった場合
                 console.error("送信エラー:", error);
                 
-                // エラーの原因がGASからのHTML（前回の「Unexpected token '<'」など）であれば、
-                // GASのデプロイ設定（アクセス権: 全員）か、API_ENDPOINTが間違っている可能性が高いです。
                 let errorMessage = `予約処理中にエラーが発生しました: ${error.message}`;
                 if (error.message.includes("Unexpected token") || error.message.includes("is not valid JSON")) {
-                     errorMessage += " (GASの設定ミス(デプロイのアクセス権:全員)やAPI_ENDPOINTの誤りの可能性があります)";
+                     errorMessage = `通信エラーが発生しました。GASのデプロイ設定（アクセス権: 全員）またはAPI_ENDPOINTを再確認してください。`;
                 }
 
                 showMessage(errorMessage, "error");
@@ -1121,11 +1113,40 @@
             }
         }
 
-        function handleSuccess(data) {
-            // 完了画面へ
+        async function handleSuccess(data) {
+            // 完了画面へ遷移する前に、LIFFメッセージを送信
+            try {
+                if (liff.isInClient()) {
+                    const messageText = `【予約完了】\n\n店舗: ${formData.store}\n日時: ${formData.date} ${formData.time}\nメニュー: ${formData.menu}\nお名前: ${formData.name}\n${data.reservationId ? `予約番号: ${data.reservationId}\n` : ''}\nご予約ありがとうございます。`;
+                    
+                    // LIFFメッセージのデータ構造がLINEの仕様に合致しているか確認
+                    const message = [{
+                        type: 'text',
+                        text: messageText
+                    }];
+                    
+                    console.log("LIFFで送信するメッセージ:", JSON.stringify(message));
+                    
+                    // LIFFメッセージ送信
+                    await liff.sendMessages(message);
+                    console.log("LIFFメッセージ送信成功");
+                }
+            } catch (liffError) {
+                console.error("LIFFメッセージ送信エラー:", liffError);
+                // ここで 'The string did not match the expected pattern.' が発生する可能性が高いです。
+                // メッセージ形式が正しいか再確認してください。
+            }
+
+            // 完了画面UIの更新
             document.getElementById('footer-nav').classList.add('hidden');
             document.getElementById('step-7').classList.add('hidden');
             document.getElementById('step-complete').classList.remove('hidden');
+
+            if (data.reservationId) {
+                const msgBox = document.getElementById('complete-message');
+                msgBox.textContent = `予約番号: ${data.reservationId}`;
+                msgBox.classList.remove('hidden');
+            }
 
             // ページトップへ
             window.scrollTo({
@@ -1133,11 +1154,7 @@
                 behavior: 'smooth'
             });
 
-            if (data.reservationId) {
-                const msgBox = document.getElementById('complete-message');
-                msgBox.textContent = `予約番号: ${data.reservationId}`;
-                msgBox.classList.remove('hidden');
-            }
+            // GASからの応答が成功した場合、メッセージ送信の成否にかかわらず完了画面を表示
         }
 
         function showMessage(msg, type) {
